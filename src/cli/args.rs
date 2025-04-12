@@ -25,6 +25,7 @@ pub enum Command {
         message: Option<String>,
         abort: bool,
         continue_merge: bool,
+        tool: Option<String>, 
     },
     Unknown { name: String },
 }

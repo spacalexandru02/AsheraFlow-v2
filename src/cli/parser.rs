@@ -262,12 +262,12 @@ impl CliParser {
                     },
                 }
             },
-            // --- Adaugă cazul pentru 'merge' ---
             "merge" => {
                 let mut branch = String::new();
                 let mut message = None;
                 let mut abort = false;
                 let mut continue_merge = false;
+                let mut tool = None; 
 
                 let mut i = 2;
                 while i < args.len() {
@@ -276,9 +276,9 @@ impl CliParser {
                         "--message" | "-m" => {
                             if i + 1 < args.len() {
                                 message = Some(args[i + 1].clone());
-                                i += 1; // Skip value
+                                i += 1; 
                             } else {
-                                 return Err(Error::Generic(format!("Option '{}' requires a value", arg)));
+                                return Err(Error::Generic(format!("Option '{}' requires a value", arg)));
                             }
                         },
                         "--abort" => {
@@ -287,9 +287,20 @@ impl CliParser {
                         "--continue" => {
                             continue_merge = true;
                         },
+                        "--tool" | "-t" => {  // Added tool handling
+                            if i + 1 < args.len() {
+                                tool = Some(args[i + 1].clone());
+                                i += 1; // Skip value
+                            } else {
+                                return Err(Error::Generic(format!("Option '{}' requires a value", arg)));
+                            }
+                        },
+                        "--tool-only" => {  // Optional shortcut to just run the tool without branch
+                            tool = Some("default".to_string());
+                        },
                         // Allow unknown flags for now or add error handling
                         _ if arg.starts_with('-') => {
-                             return Err(Error::Generic(format!("Unknown option for merge: {}", arg)));
+                            return Err(Error::Generic(format!("Unknown option for merge: {}", arg)));
                         },
                         // Assume the first non-flag argument is the branch name
                         _ if branch.is_empty() => {
@@ -297,21 +308,25 @@ impl CliParser {
                         },
                         // Handle unexpected additional arguments
                         _ => {
-                             return Err(Error::Generic(format!("Unexpected argument for merge: {}", arg)));
+                            return Err(Error::Generic(format!("Unexpected argument for merge: {}", arg)));
                         }
                     }
-                     i += 1; // Increment index
+                    i += 1; // Increment index
                 }
 
-                // Branch name is required unless --abort or --continue is specified
-                if branch.is_empty() && !abort && !continue_merge {
-                    return Err(Error::Generic("No branch specified for merge and not using --abort or --continue".to_string()));
+                // Special case: if --tool-only or --tool is provided without branch, it means
+                // we want to just run the tool on existing conflicts
+                let resolve_only = tool.is_some() && branch.is_empty() && !abort && !continue_merge;
+                
+                // Branch name is required unless --abort, --continue, or just running the tool
+                if branch.is_empty() && !abort && !continue_merge && !resolve_only {
+                    return Err(Error::Generic("No branch specified for merge and not using --abort, --continue, or --tool".to_string()));
                 }
+                
                 // Cannot specify branch name with --abort or --continue
-                 if !branch.is_empty() && (abort || continue_merge) {
-                     return Err(Error::Generic("Cannot specify branch name with --abort or --continue".to_string()));
-                 }
-
+                if !branch.is_empty() && (abort || continue_merge) {
+                    return Err(Error::Generic("Cannot specify branch name with --abort or --continue".to_string()));
+                }
 
                 CliArgs {
                     command: Command::Merge {
@@ -319,10 +334,10 @@ impl CliParser {
                         message,
                         abort,
                         continue_merge,
+                        tool,
                     },
                 }
             },
-            // --- Sfârșit caz 'merge' ---
             _ => CliArgs {
                 command: Command::Unknown { name: command },
             },
@@ -331,25 +346,27 @@ impl CliParser {
         Ok(cli_args)
     }
 
-    // Updated format_help to include merge
-     pub fn format_help() -> String {
-         format!(
-             "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", // Added one {}
-             "Usage: ash <command> [options]",
-             "Commands:",
-             "  init [path]                       Initialize a new repository",
-             "  add <paths...>                    Add file contents to the index",
-             "  commit -m <message>               Commit changes to the repository",
-             "  status [--porcelain] [--color=...] Show the working tree status",
-             "  diff [--cached] [paths...]        Show changes (HEAD vs index or index vs workspace)",
-             "  branch [-v] [-d|-D] [<n> [<sp>]]  Manage branches (list, create, delete)",
-             "  checkout <target>                 Switch branches or restore working tree files",
-             "  log [--oneline] [--decorate=...]  Show commit logs",
-             "  merge <branch> [-m <msg>]         Merge the specified branch into the current branch", // Added merge
-             "        --abort                     Abort the current merge resolution process",
-             "        --continue                  Continue the merge after resolving conflicts (not implemented)",
-             "Common Options:",
-             "  (Options specific to commands listed above)"
-         )
-     }
+    pub fn format_help() -> String {
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "Usage: ash <command> [options]",
+            "Commands:",
+            "  init [path]                       Initialize a new repository",
+            "  add <paths...>                    Add file contents to the index",
+            "  commit -m <message>               Commit changes to the repository",
+            "  status [--porcelain] [--color=...] Show the working tree status",
+            "  diff [--cached] [paths...]        Show changes (HEAD vs index or index vs workspace)",
+            "  branch [-v] [-d|-D] [<n> [<sp>]]  Manage branches (list, create, delete)",
+            "  checkout <target>                 Switch branches or restore working tree files",
+            "  log [--oneline] [--decorate=...]  Show commit logs",
+            "  merge <branch> [-m <msg>]         Merge the specified branch into the current branch",
+            "        --abort                     Abort the current merge resolution process",
+            "        --continue                  Continue the merge after resolving conflicts",
+            "        --tool=<tool>               Use specified tool to resolve merge conflicts",
+            "        --tool-only                 Run merge tool to resolve conflicts without merging",
+            "Common Options:",
+            "  (Options specific to commands listed above)",
+            "  --help                           Display this help message"
+        )
+    }
 }

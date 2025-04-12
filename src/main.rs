@@ -12,8 +12,9 @@ use commands::add::AddCommand;
 use commands::log::LogCommand;
 use commands::status::StatusCommand;
 use commands::branch::BranchCommand;
-// --- Adaugă import pentru MergeCommand ---
+// --- Adaugă import pentru MergeCommand și MergeToolCommand ---
 use commands::merge::MergeCommand;
+use commands::merge_tool::MergeToolCommand;
 
 mod cli;
 mod commands;
@@ -42,21 +43,25 @@ fn handle_command(cli_args: CliArgs) {
         Command::Checkout { target } => handle_checkout_command(&target),
         Command::Log { revisions, abbrev, format, patch, decorate } =>
             handle_log_command(&revisions, abbrev, &format, patch, &decorate),
-        Command::Merge { branch, message, abort, continue_merge } => {
-                if abort {
+        Command::Merge { branch, message, abort, continue_merge, tool } => {
+                // Dacă a fost specificat tool, rulează mergetool
+                if tool.is_some() {
+                    handle_merge_tool_command(tool.as_deref());
+                }
+                // Pentru abort și continue, păstrăm comportamentul actual
+                else if abort {
                     // Handle merge abort
-                    // Placeholder - Add logic for aborting merge here
                     println!("Merge abort functionality not fully implemented yet.");
-                    process::exit(1); // Exit with error for now
-                } else if continue_merge {
+                    process::exit(1);
+                } 
+                else if continue_merge {
                     // Handle merge continue
-                    // Placeholder - Add logic for continuing merge here (usually after resolving conflicts)
                     println!("Merge continue functionality not fully implemented yet.");
-                     // This would typically involve reading the resolved state, creating a commit
-                    process::exit(1); // Exit with error for now
-                } else {
-                    // Handle a normal merge operation
-                    handle_merge_command(&branch, message.as_deref()) // Pass Option<&str>
+                    process::exit(1);
+                } 
+                // Merge normal
+                else {
+                    handle_merge_command(&branch, message.as_deref());
                 }
             },
         Command::Unknown { name } => exit_with_error(&format!("'{}' is not a ash command", name)),
@@ -142,6 +147,14 @@ fn handle_checkout_command(target: &str) {
     }
 }
 
+// Add function to handle merge_tool command
+fn handle_merge_tool_command(tool: Option<&str>) {
+    match MergeToolCommand::execute(tool) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
 fn exit_with_error(message: &str) -> ! {
     eprintln!("{}", message); // Afișează eroarea pe stderr
     // Poți adăuga logica de afișare a mesajului de ajutor aici dacă dorești
@@ -151,7 +164,7 @@ fn exit_with_error(message: &str) -> ! {
     process::exit(1); // Ieșim cu cod de eroare (1)
 }
 
-// --- Adaugă funcția handle_merge_command ---
+// --- Păstrează funcția handle_merge_command originală ---
 fn handle_merge_command(branch: &str, message: Option<&str>) {
     match MergeCommand::execute(branch, message) {
         // Cazul 1: Merge-ul a reușit fără conflicte sau alte condiții speciale.
