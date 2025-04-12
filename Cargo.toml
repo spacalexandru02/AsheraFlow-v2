@@ -1,0 +1,19 @@
+[package]
+name = "AsheraFlow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sha1 = "0.10"
+flate2 = "1.0"
+rand = "0.8"
+chrono = "0.4"
+itertools = "0.10"
+regex = "1.9.1" 
+hex = "0.4"
+tempfile = "3.3.0"
+walkdir = "2.3.2"
+assert_cmd = "2.0.11"
+predicates = "2.1.5"
+atty = "0.2"
+lazy_static = "1.4.0"
