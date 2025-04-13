@@ -466,7 +466,7 @@ fn execute_changes(&mut self) -> Result<(), Error> {
             
             // Also remove from index
             let path_str = path.to_string_lossy().to_string();
-            self.repo.index.remove(&path_str)?;
+            self.repo.index.remove(&PathBuf::from(&path_str))?;
             
             // Add parent directories to the affected dirs list
             if let Some(parent) = path.parent() {
@@ -657,7 +657,7 @@ fn execute_changes(&mut self) -> Result<(), Error> {
                 
                 // Also remove from index
                 let path_str = file_path.to_string_lossy().to_string();
-                self.repo.index.remove(&path_str)?;
+                self.repo.index.remove(&PathBuf::from(&path_str))?;
             }
         }
         

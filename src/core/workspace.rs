@@ -448,4 +448,45 @@ impl Workspace {
              Ok(())
         }
     }
+
+    pub fn remove(&self, path: &Path) -> Result<(), Error> {
+        // Remove the file first
+        self.remove_file(path)?;
+        
+        // Try to remove parent directories if they become empty
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                self.remove_directory(parent)?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn read_head(&self) -> Result<String, Error> {
+        let head_path = self.root_path.join(".ash/HEAD");
+        
+        if !head_path.exists() {
+            return Err(Error::Generic("HEAD file not found".to_string()));
+        }
+        
+        let content = std::fs::read_to_string(head_path).map_err(Error::IO)?;
+        let content = content.trim();
+        
+        // Check if it's a symbolic reference
+        if content.starts_with("ref: ") {
+            let ref_path = content[5..].trim();
+            let full_ref_path = self.root_path.join(".ash").join(ref_path);
+            
+            if !full_ref_path.exists() {
+                return Err(Error::Generic(format!("Referenced file not found: {}", ref_path)));
+            }
+            
+            let ref_content = std::fs::read_to_string(full_ref_path).map_err(Error::IO)?;
+            Ok(ref_content.trim().to_string())
+        } else {
+            // Direct reference to a commit
+            Ok(content.to_string())
+        }
+    }
 }

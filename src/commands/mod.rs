@@ -8,3 +8,4 @@ pub mod checkout;
 pub mod log;
 pub mod merge;
 pub mod merge_tool;
+pub mod rm;

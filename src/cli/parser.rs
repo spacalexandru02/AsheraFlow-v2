@@ -262,6 +262,52 @@ impl CliParser {
                     },
                 }
             },
+            "rm" => {
+                // Parse rm command options
+                let mut files = Vec::new();
+                let mut cached = false;
+                let mut force = false;
+                let mut recursive = false;
+                
+                // Process arguments
+                let mut i = 2;
+                while i < args.len() {
+                    let arg = &args[i];
+                    match arg.as_str() {
+                        "--cached" => {
+                            cached = true;
+                        },
+                        "-f" | "--force" => {
+                            force = true;
+                        },
+                        "-r" | "--recursive" => {
+                            recursive = true;
+                        },
+                        a if a.starts_with('-') => {
+                            // Unknown flag
+                            return Err(Error::Generic(format!("Unknown option for rm: {}", a)));
+                        },
+                        _ => {
+                            // This is a file path
+                            files.push(arg.clone());
+                        }
+                    }
+                    i += 1;
+                }
+                
+                if files.is_empty() {
+                    return Err(Error::Generic("No files specified for removal".to_string()));
+                }
+                
+                CliArgs {
+                    command: Command::Rm {
+                        files,
+                        cached,
+                        force,
+                        recursive,
+                    },
+                }
+            },
             "merge" => {
                 let mut branch = String::new();
                 let mut message = None;
@@ -290,12 +336,12 @@ impl CliParser {
                         "--tool" | "-t" => {  // Added tool handling
                             if i + 1 < args.len() {
                                 tool = Some(args[i + 1].clone());
-                                i += 1; // Skip value
+                                i += 1;
                             } else {
                                 return Err(Error::Generic(format!("Option '{}' requires a value", arg)));
                             }
                         },
-                        "--tool-only" => {  // Optional shortcut to just run the tool without branch
+                        "--tool-only" => { 
                             tool = Some("default".to_string());
                         },
                         // Allow unknown flags for now or add error handling

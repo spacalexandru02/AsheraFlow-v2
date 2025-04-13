@@ -311,7 +311,7 @@ impl MergeCommand {
                             println!("  -> Removing file: {}", path.display());
                             workspace.remove_file(&path)?;
                         }
-                        index.remove(&path_str)?; // Remove from index
+                        index.remove(&PathBuf::from(&path_str))?; // Remove from index
                     },
                     (None, None) => {
                         println!("  -> Warning: Diff entry with no old or new state for {}", path.display());
@@ -435,7 +435,7 @@ impl MergeCommand {
             }
             
             // Șterge din index
-            index.remove(&path_str)?;
+            index.remove(&PathBuf::from(&path_str))?;
         }
         
         Ok(())

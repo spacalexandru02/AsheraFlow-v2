@@ -57,6 +57,16 @@ impl AddCommand {
         // Flag to track if we have deleted directories
         let mut has_deleted_dirs = false;
         
+        // Track the number of files we successfully process
+        let mut added_count = 0;
+        let mut deleted_count = 0;
+        let mut unchanged_count = 0;
+        // Keep track of paths that were actually processed
+        let mut processed_paths: Vec<PathBuf> = Vec::new();
+        // Track new vs modified files
+        let mut new_files = 0;
+        let mut modified_files = 0;
+        
         // Check each path
         for path_str in paths {
             let path = PathBuf::from(path_str);
@@ -146,11 +156,6 @@ impl AddCommand {
             println!("No files to add or remove");
             return Ok(());
         }
-        
-        // Track the number of files we successfully process
-        let mut added_count = 0;
-        let mut deleted_count = 0;
-        let mut unchanged_count = 0;
         
         // First, handle deleted files
         for path_str in &files_to_delete {
@@ -247,6 +252,19 @@ impl AddCommand {
                 return Err(e);
             }
             
+            // Record the processed path
+            processed_paths.push(file_path.clone());
+            
+            // Determine if it's a new or modified file
+            let file_path_str = file_path.to_string_lossy().to_string();
+            if existing_oids.contains_key(&file_path_str) {
+                println!("Modified file: {}", file_path_str);
+                modified_files += 1;
+            } else {
+                println!("New file: {}", file_path_str);
+                new_files += 1;
+            }
+            
             added_count += 1;
         }
         
@@ -276,28 +294,8 @@ impl AddCommand {
                 }
                 
                 // Count how many files are new vs modified
-                let mut new_files = 0;
-                let mut modified_files = 0;
-                
-                for path in &files_to_add {
-                    let path_str = path.to_string_lossy().to_string();
-                    
-                    if head_files.contains_key(&path_str) {
-                        // Get current OID from index
-                        let current_oid = index.get_entry(&path_str)
-                            .map(|entry| entry.get_oid())
-                            .unwrap_or("");
-                        
-                        // Compare OIDs to see if the file has changed
-                        if let Some(head_oid) = head_files.get(&path_str) {
-                            if head_oid != current_oid {
-                                modified_files += 1;
-                            }
-                        }
-                    } else {
-                        new_files += 1;
-                    }
-                }
+                println!("Debug -- files_to_add: {}, added_count: {}, processed_paths: {}", 
+                         files_to_add.len(), added_count, processed_paths.len());
                 
                 // Format output message
                 let mut message = String::new();
@@ -321,6 +319,13 @@ impl AddCommand {
                     ));
                 }
                 
+                // Dacă nu am determinat niciun fișier, folosim added_count
+                if message.is_empty() && added_count > 0 {
+                    message = format!("{} file{}", 
+                                     added_count,
+                                     if added_count == 1 { "" } else { "s" });
+                }
+                
                 if deleted_count > 0 {
                     if !message.is_empty() {
                         message.push_str(" and ");
@@ -330,11 +335,6 @@ impl AddCommand {
                         deleted_count,
                         if deleted_count == 1 { "" } else { "s" }
                     ));
-                }
-                
-                if message.is_empty() {
-                    message = format!("{} file{}", added_count + deleted_count, 
-                        if (added_count + deleted_count) == 1 { "" } else { "s" });
                 }
                 
                 if unchanged_count > 0 {

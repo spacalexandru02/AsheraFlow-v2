@@ -15,6 +15,10 @@ use commands::branch::BranchCommand;
 // --- Adaugă import pentru MergeCommand și MergeToolCommand ---
 use commands::merge::MergeCommand;
 use commands::merge_tool::MergeToolCommand;
+use commands::rm::RmCommand;
+use std::path::Path;
+use crate::core::index::index::Index;
+use crate::core::refs::Refs;
 
 mod cli;
 mod commands;
@@ -43,6 +47,8 @@ fn handle_command(cli_args: CliArgs) {
         Command::Checkout { target } => handle_checkout_command(&target),
         Command::Log { revisions, abbrev, format, patch, decorate } =>
             handle_log_command(&revisions, abbrev, &format, patch, &decorate),
+        Command::Rm { files, cached, force, recursive } =>
+            handle_rm_command(&files, cached, force, recursive),
         Command::Merge { branch, message, abort, continue_merge, tool } => {
                 // Dacă a fost specificat tool, rulează mergetool
                 if tool.is_some() {
@@ -56,8 +62,7 @@ fn handle_command(cli_args: CliArgs) {
                 } 
                 else if continue_merge {
                     // Handle merge continue
-                    println!("Merge continue functionality not fully implemented yet.");
-                    process::exit(1);
+                    handle_merge_continue_command();
                 } 
                 // Merge normal
                 else {
@@ -150,6 +155,62 @@ fn handle_checkout_command(target: &str) {
 // Add function to handle merge_tool command
 fn handle_merge_tool_command(tool: Option<&str>) {
     match MergeToolCommand::execute(tool) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+/// Handles merge continue operation
+fn handle_merge_continue_command() {
+    println!("Checking for unresolved conflicts...");
+    
+    // Initialize repository components
+    let root_path = Path::new(".");
+    let git_path = root_path.join(".ash");
+    
+    if !git_path.exists() {
+        println!("Not an AsheraFlow repository: .ash directory not found");
+        process::exit(1);
+    }
+    
+    // Check if we can access the index
+    let mut index = Index::new(git_path.join("index"));
+    match index.load() {
+        Ok(_) => {
+            // Check if there are unresolved conflicts
+            if index.has_conflict() {
+                println!("There are still unresolved conflicts.");
+                println!("Fix the conflicts first, then run 'ash merge --continue'");
+                process::exit(1);
+            }
+        },
+        Err(e) => {
+            println!("Error loading index: {}", e);
+            process::exit(1);
+        }
+    }
+    
+    // All conflicts are resolved, complete the merge with a commit
+    println!("All conflicts resolved. Creating merge commit...");
+    
+    // Generate a default merge message
+    let message = "Merge branch (conflicts resolved)";
+    
+    // In merge --continue we don't need to specify a branch, so use empty string
+    match CommitCommand::execute(message) {
+        Ok(_) => {
+            println!("Merge completed successfully.");
+            process::exit(0);
+        },
+        Err(e) => {
+            println!("Error completing merge: {}", e);
+            process::exit(1);
+        }
+    }
+}
+
+fn handle_rm_command(files: &[String], cached: bool, force: bool, recursive: bool) {
+    match RmCommand::execute(files, cached, force, recursive) {
         Ok(_) => process::exit(0),
         Err(e) => exit_with_error(&format!("fatal: {}", e)),
     }

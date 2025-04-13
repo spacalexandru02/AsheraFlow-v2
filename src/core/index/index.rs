@@ -422,17 +422,46 @@ impl Index {
     pub fn tracked(&self, path: &str) -> bool {
         self.entries.contains_key(path)
     }
-
-    pub fn remove(&mut self, path: &str) -> Result<(), Error> {
-        // Remove the exact entry
-        self.remove_entry(path);
+    
+    pub fn tracked_file(&self, path: &Path) -> bool {
+        self.tracked(&path.to_string_lossy())
+    }
+    
+    pub fn tracked_directory(&self, path: &Path) -> bool {
+        let path_str = path.to_string_lossy().to_string();
+        let prefix = if path_str.ends_with('/') {
+            path_str.clone()
+        } else {
+            format!("{}/", path_str)
+        };
         
-        // Remove any entries that are children of this path (for directories)
-        self.remove_children(path);
+        // Check if any key starts with this prefix
+        self.keys.iter().any(|key| key.starts_with(&prefix))
+    }
+    
+    pub fn child_paths(&self, path: &Path) -> Vec<PathBuf> {
+        let path_str = path.to_string_lossy().to_string();
+        let prefix = if path_str.ends_with('/') {
+            path_str.clone()
+        } else {
+            format!("{}/", path_str)
+        };
         
-        // Mark the index as changed
+        self.keys
+            .iter()
+            .filter(|key| key.starts_with(&prefix) || **key == path_str)
+            .map(|key| PathBuf::from(key))
+            .collect()
+    }
+    
+    pub fn remove(&mut self, path: &Path) -> Result<(), Error> {
+        let path_str = path.to_string_lossy().to_string();
+        
+        // Remove the entry and its children
+        self.remove_entry(&path_str);
+        self.remove_children(&path_str);
+        
         self.changed = true;
-        
         Ok(())
     }
     
@@ -518,18 +547,69 @@ impl Index {
     }
     
     // Resolve a conflict by setting the given path to the final resolution
-    pub fn resolve_conflict(&mut self, path: &Path, oid: &str, stat: &fs::Metadata) -> Result<(), Error> {
+    pub fn resolve_conflict(&mut self, path: &Path, oid: &str, stat: &std::fs::Metadata) -> Result<(), Error> {
+        // First, remove any conflict entries for this path
         let path_str = path.to_string_lossy().to_string();
+        self.remove_conflict(&path_str);
         
-        // Remove all conflict stage entries for this path
-        self.entries.retain(|k, v| k != &path_str || v.stage == 0);
-        
-        // Add the resolved entry with stage 0
+        // Then add the resolved entry
         self.add(path, oid, stat)?;
         
-        // Update keys collection if necessary
-        // Make sure the key is present only once
-        self.keys.insert(path_str);
+        self.changed = true;
+        Ok(())
+    }
+    
+    // Remove conflict entries for a path
+    fn remove_conflict(&mut self, path_str: &str) {
+        println!("Removing conflict for path: {}", path_str);
+        
+        // Get all entries for this path with their stages
+        let entries_to_remove: Vec<(String, u8)> = self.entries.iter()
+            .filter(|(k, v)| k == &path_str && v.stage > 0)
+            .map(|(k, v)| (k.clone(), v.stage))
+            .collect();
+        
+        // Remove each conflict entry
+        for (key, stage) in entries_to_remove {
+            println!("  Removing stage {} entry for {}", stage, key);
+            self.entries.remove(&key);
+        }
+        
+        // Check if there are any entries left for this path
+        if !self.entries.iter().any(|(k, _)| k == path_str) {
+            println!("  No entries left for path {}, removing from keys collection", path_str);
+            self.keys.remove(path_str);
+        } else {
+            println!("  Regular (non-conflict) entry remains for {}", path_str);
+        }
+    }
+    
+    // Method to resolve directory conflicts
+    pub fn resolve_directory_conflict(&mut self, dir_path: &Path) -> Result<(), Error> {
+        let dir_path_str = dir_path.to_string_lossy().to_string();
+        
+        // Remove the conflict entries for the directory itself
+        self.remove_conflict(&dir_path_str);
+        
+        // Also remove conflicts for all files inside the directory
+        let dir_prefix = if dir_path_str.ends_with('/') {
+            dir_path_str.clone()
+        } else {
+            format!("{}/", dir_path_str)
+        };
+        
+        // Find all entries that start with this prefix
+        let conflict_paths: Vec<String> = self.entries.iter()
+            .filter(|(path, entry)| 
+                entry.stage > 0 && path.starts_with(&dir_prefix))
+            .map(|(path, _)| path.clone())
+            .collect();
+        
+        // Remove each conflict entry
+        for path in conflict_paths {
+            println!("Removing conflict entry for file in directory: {}", path);
+            self.remove_conflict(&path);
+        }
         
         self.changed = true;
         Ok(())

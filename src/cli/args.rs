@@ -27,6 +27,12 @@ pub enum Command {
         continue_merge: bool,
         tool: Option<String>, 
     },
+    Rm {
+        files: Vec<String>,
+        cached: bool,
+        force: bool,
+        recursive: bool,
+    },
     Unknown { name: String },
 }
 

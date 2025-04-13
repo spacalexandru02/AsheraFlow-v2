@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::core::database::blob::Blob;
 use crate::core::database::database::{Database, GitObject};
 use crate::core::database::entry::DatabaseEntry;
+use crate::core::database::tree::{Tree, TreeEntry};
 use crate::core::file_mode::FileMode;
 use crate::core::index::index::Index;
 use crate::core::workspace::Workspace;
@@ -143,7 +144,7 @@ impl<'a, T: MergeInputs> Resolve<'a, T> {
                 } else {
                     println!("    Path {} already removed.", path.display());
                 }
-                self.index.remove(&path_str)?;
+                self.index.remove(&PathBuf::from(&path_str))?;
             }
         }
         println!("Finished applying clean changes.");
@@ -470,24 +471,41 @@ impl<'a, T: MergeInputs> Resolve<'a, T> {
          left: Option<DatabaseEntry>,
          right: Option<DatabaseEntry>,
      ) -> Result<(), Error> {
-         let path_str = path.to_string_lossy().to_string();
+        let path_str = path.to_string_lossy().to_string();
 
-         if self.conflicts.contains_key(&path_str) { return Ok(()); }
-
-         let left_is_dir = left.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
-         let right_is_dir = right.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
-
-          // Handle direct file/directory conflict using the dedicated helper
-          if left.is_some() && right.is_some() && left_is_dir != right_is_dir {
-               let (file_entry, branch_with_file) = if left_is_dir {
-                    (right.clone().unwrap(), self.inputs.right_name()) // Right has file
-               } else {
-                    (left.clone().unwrap(), self.inputs.left_name()) // Left has file
-               };
-               // Call the helper, passing the FILE entry and the branch it came from
-               self.handle_file_directory_conflict(path, file_entry, &branch_with_file)?;
-               return Ok(()); // Conflict handled
-          }
+        if self.conflicts.contains_key(&path_str) { return Ok(()); }
+    
+        let left_is_dir = left.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
+        let right_is_dir = right.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
+    
+        // Handle direct file/directory conflict using the dedicated helper
+        if left.is_some() && right.is_some() && left_is_dir != right_is_dir {
+            let (file_entry, branch_with_file) = if left_is_dir {
+                (right.clone().unwrap(), self.inputs.right_name()) // Right has file
+            } else {
+                (left.clone().unwrap(), self.inputs.left_name()) // Left has file
+            };
+            
+            // Before calling handle_file_directory_conflict, check if we're dealing with a directory
+            if left_is_dir || right_is_dir {
+                // Look for actual files under this directory that have conflicts
+                // Instead of just treating the directory itself as a conflict
+                if path.exists() && path.is_dir() {
+                    // Check if we can find any files that should be treated as conflicts
+                    self.find_conflicted_files_in_directory(path, base.clone(), left.clone(), right.clone())?;
+                    
+                    // Only record directory conflict if no files were found
+                    if !self.conflicts.keys().any(|p| p.starts_with(&format!("{}/", path_str))) {
+                        // Call the helper only if no file conflicts were found
+                        self.handle_file_directory_conflict(path, file_entry, &branch_with_file)?;
+                    }
+                    return Ok(());
+                }
+            } 
+            // Call the helper, passing the FILE entry and the branch it came from
+            self.handle_file_directory_conflict(path, file_entry, &branch_with_file)?;
+            return Ok(());
+        }
 
 
          if left == right {
@@ -545,6 +563,170 @@ impl<'a, T: MergeInputs> Resolve<'a, T> {
          Ok(())
      }
 
+     fn find_conflicted_files_in_directory(
+        &mut self,
+        dir_path: &Path,
+        base: Option<DatabaseEntry>,
+        left: Option<DatabaseEntry>,
+        right: Option<DatabaseEntry>
+    ) -> Result<(), Error> {
+        println!("Looking for conflicts in directory: {}", dir_path.display());
+        
+        // Only continue if at least one of the entries is a directory
+        let left_is_dir = left.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
+        let right_is_dir = right.as_ref().map_or(false, |e| e.get_file_mode().is_directory());
+        
+        if !left_is_dir && !right_is_dir {
+            return Ok(());
+        }
+        
+        // Get the left and right directory OIDs
+        let left_dir_oid = left.as_ref().map(|e| e.get_oid());
+        let right_dir_oid = right.as_ref().map(|e| e.get_oid());
+        
+        println!("Left directory OID: {:?}", left_dir_oid);
+        println!("Right directory OID: {:?}", right_dir_oid);
+        
+        // Gather files from both left and right directories
+        let mut left_files = HashMap::new(); 
+        let mut right_files = HashMap::new();
+        
+        if let Some(oid) = left_dir_oid {
+            println!("Gathering files from left directory OID: {}", oid);
+            match self.gather_files_from_tree(oid, dir_path) {
+                Ok(files) => {
+                    println!("Found {} files in left directory", files.len());
+                    left_files = files;
+                },
+                Err(e) => println!("Error gathering left files: {}", e)
+            }
+        }
+        
+        if let Some(oid) = right_dir_oid {
+            println!("Gathering files from right directory OID: {}", oid);
+            match self.gather_files_from_tree(oid, dir_path) {
+                Ok(files) => {
+                    println!("Found {} files in right directory", files.len());
+                    right_files = files;
+                },
+                Err(e) => println!("Error gathering right files: {}", e)
+            }
+        }
+        
+        // Find all file paths in either directory
+        let mut all_paths = HashSet::new();
+        for path in left_files.keys() {
+            all_paths.insert(path.clone());
+        }
+        for path in right_files.keys() {
+            all_paths.insert(path.clone());
+        }
+        
+        println!("Total unique paths from both directories: {}", all_paths.len());
+        
+        // Check each path for conflicts
+        let mut found_conflicts = false;
+        for path in all_paths {
+            let left_entry = left_files.get(&path).cloned();
+            let right_entry = right_files.get(&path).cloned();
+            
+            let left_oid = left_entry.as_ref().map(|e| e.get_oid());
+            let right_oid = right_entry.as_ref().map(|e| e.get_oid());
+            
+            println!("Checking path: {} (left OID: {:?}, right OID: {:?})", 
+                     path.display(), left_oid, right_oid);
+            
+            // Skip if entries match (same OID)
+            if left_oid == right_oid && left_oid.is_some() {
+                println!("  Entries match, skipping");
+                continue;
+            }
+            
+            // Record conflict for this file
+            println!("Found conflict for file: {}", path.display());
+            found_conflicts = true;
+            
+            // Create a conflict entry for this file
+            let path_str = path.to_string_lossy().to_string();
+            self.conflicts.insert(
+                path_str.clone(),
+                vec![None, left_entry, right_entry]
+            );
+            
+            // Log the conflict
+            let conflict_message = format!("CONFLICT (content): Merge conflict in {}", path_str);
+            self.log(conflict_message);
+        }
+        
+        // If we found conflicts in individual files, remove the directory conflict entry
+        if found_conflicts {
+            let dir_path_str = dir_path.to_string_lossy().to_string();
+            if self.conflicts.contains_key(&dir_path_str) {
+                println!("Removing directory conflict entry for {} as individual file conflicts were found", dir_path_str);
+                self.conflicts.remove(&dir_path_str);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    // Helper method to gather files from a tree object
+    fn gather_files_from_tree(
+        &mut self,
+        oid: &str, 
+        prefix: &Path
+    ) -> Result<HashMap<PathBuf, DatabaseEntry>, Error> {
+        let mut files = HashMap::new();
+        
+        let obj = self.database.load(oid)?;
+        if let Some(tree) = obj.as_any().downcast_ref::<Tree>() {
+            println!("Loaded tree for {}: {}", prefix.display(), tree.get_oid().map_or("unknown".to_string(), |s| s.to_string()));
+            for (name, entry) in tree.get_entries() {
+                let entry_path = prefix.join(name);
+                println!("  Found tree entry: {} ({})", entry_path.display(), 
+                         if let TreeEntry::Blob(_, mode) = &entry { 
+                             if mode.is_directory() { "directory" } else { "file" } 
+                         } else { "tree" });
+                
+                match entry {
+                    TreeEntry::Blob(blob_oid, mode) => {
+                        if mode.is_directory() {
+                            // For directories, we need to get the Tree object and process it
+                            let subtree_obj = self.database.load(&blob_oid)?;
+                            if let Some(subtree) = subtree_obj.as_any().downcast_ref::<Tree>() {
+                                println!("    Processing subtree: {}", subtree.get_oid().map_or("unknown".to_string(), |s| s.to_string()));
+                                let subtree_oid = subtree.get_oid().map_or("".to_string(), |s| s.to_string());
+                                if !subtree_oid.is_empty() {
+                                    let subtree_files = self.gather_files_from_tree(&subtree_oid, &entry_path)?;
+                                    files.extend(subtree_files);
+                                }
+                            }
+                        } else {
+                            // Regular file
+                            println!("    Adding file: {} ({})", entry_path.display(), blob_oid);
+                            let entry = DatabaseEntry::new(
+                                entry_path.to_string_lossy().to_string(),
+                                blob_oid.clone(),
+                                &mode.to_octal_string()
+                            );
+                            files.insert(entry_path, entry);
+                        }
+                    },
+                    TreeEntry::Tree(subtree) => {
+                        if let Some(subtree_oid) = subtree.get_oid() {
+                            println!("    Processing direct tree: {}", subtree_oid);
+                            let subtree_files = self.gather_files_from_tree(subtree_oid, &entry_path)?;
+                            files.extend(subtree_files);
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("Warning: Object {} is not a tree", oid);
+        }
+        
+        Ok(files)
+    }
 
     // Takes &mut self
       fn update_workspace_file(
