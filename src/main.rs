@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::env;
 use std::process;
-use cli::args::CliArgs;
 use cli::args::Command;
 use cli::parser::CliParser;
 use commands::checkout::CheckoutCommand;
@@ -16,9 +15,13 @@ use commands::branch::BranchCommand;
 use commands::merge::MergeCommand;
 use commands::merge_tool::MergeToolCommand;
 use commands::rm::RmCommand;
+use commands::reset::ResetCommand;
 use std::path::Path;
 use crate::core::index::index::Index;
 use crate::core::refs::Refs;
+use crate::errors::error::Error;
+use std::time::Instant;
+use crate::core::repository::repository::Repository;
 
 mod cli;
 mod commands;
@@ -26,53 +29,63 @@ mod validators;
 mod errors;
 mod core;
 
+// Definim constanta ORIG_HEAD local
+const ORIG_HEAD: &str = "ORIG_HEAD";
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     match CliParser::parse(args) {
-        Ok(cli_args) => handle_command(cli_args),
-        Err(e) => exit_with_error(&e.to_string()),
-    }
-}
-
-fn handle_command(cli_args: CliArgs) {
-    match cli_args.command {
-        Command::Init { path } => handle_init_command(&path),
-        Command::Commit { message } => handle_commit_command(&message),
-        Command::Add { paths } => handle_add_command(&paths),
-        Command::Status { porcelain, color } => handle_status_command(porcelain, &color),
-        Command::Diff { paths, cached } => handle_diff_command(&paths, cached),
-        Command::Branch { name, start_point, verbose, delete, force } =>
-            handle_branch_command(&name, start_point.as_deref(), verbose, delete, force),
-        Command::Checkout { target } => handle_checkout_command(&target),
-        Command::Log { revisions, abbrev, format, patch, decorate } =>
-            handle_log_command(&revisions, abbrev, &format, patch, &decorate),
-        Command::Rm { files, cached, force, recursive } =>
-            handle_rm_command(&files, cached, force, recursive),
-        Command::Merge { branch, message, abort, continue_merge, tool } => {
-                // Dacă a fost specificat tool, rulează mergetool
-                if tool.is_some() {
-                    handle_merge_tool_command(tool.as_deref());
-                }
-                // Pentru abort și continue, păstrăm comportamentul actual
-                else if abort {
-                    // Handle merge abort
-                    println!("Merge abort functionality not fully implemented yet.");
+        Ok(cli_args) => {
+            match cli_args.command {
+                Command::Init { path } => handle_init_command(&path),
+                Command::Commit { message, amend, reuse_message, edit } => 
+                    handle_commit_command(&message),
+                Command::Add { paths } => handle_add_command(&paths),
+                Command::Status { porcelain, color } => handle_status_command(porcelain, &color),
+                Command::Diff { paths, cached } => handle_diff_command(&paths, cached),
+                Command::Branch { name, start_point, verbose, delete, force } => {
+                    handle_branch_command(&name, start_point.as_deref(), verbose, delete, force)
+                },
+                Command::Checkout { target } => handle_checkout_command(&target),
+                Command::Log { revisions, abbrev, format, patch, decorate } => {
+                    handle_log_command(&revisions, abbrev, &format, patch, &decorate)
+                },
+                Command::Merge { branch, message, abort, continue_merge, tool } => {
+                    if abort {
+                        handle_merge_abort_command();
+                    } else if continue_merge {
+                        handle_merge_continue_command();
+                    } else if tool.is_some() && branch.is_empty() {
+                        handle_merge_tool_command(tool.as_deref());
+                    } else {
+                        handle_merge_command(&branch, message.as_deref());
+                    }
+                },
+                Command::Rm { files, cached, force, recursive } => {
+                    handle_rm_command(&files, cached, force, recursive)
+                },
+                Command::Reset { files, soft, mixed, hard, force, reuse_message } => {
+                    handle_reset_command(&files, soft, mixed, hard, force, reuse_message.as_deref())
+                },
+                Command::Unknown { name } => {
+                    println!("Unknown command: {}", name);
+                    println!("{}", CliParser::format_help());
                     process::exit(1);
-                } 
-                else if continue_merge {
-                    // Handle merge continue
-                    handle_merge_continue_command();
-                } 
-                // Merge normal
-                else {
-                    handle_merge_command(&branch, message.as_deref());
                 }
-            },
-        Command::Unknown { name } => exit_with_error(&format!("'{}' is not a ash command", name)),
+            }
+        },
+        Err(e) => {
+            if e.to_string().contains("Usage:") {
+                // Handle the case where no command is given
+                println!("{}", e);
+            } else {
+                println!("Error parsing command: {}", e);
+            }
+            process::exit(1);
+        }
     }
 }
-
 
 fn handle_commit_command(message: &str) {
     match CommitCommand::execute(message) {
@@ -216,6 +229,13 @@ fn handle_rm_command(files: &[String], cached: bool, force: bool, recursive: boo
     }
 }
 
+fn handle_reset_command(files: &[String], soft: bool, mixed: bool, hard: bool, force: bool, reuse_message: Option<&str>) {
+    match ResetCommand::execute(files, soft, mixed, hard, force, reuse_message) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
 fn exit_with_error(message: &str) -> ! {
     eprintln!("{}", message); // Afișează eroarea pe stderr
     // Poți adăuga logica de afișare a mesajului de ajutor aici dacă dorești
@@ -228,36 +248,56 @@ fn exit_with_error(message: &str) -> ! {
 // --- Păstrează funcția handle_merge_command originală ---
 fn handle_merge_command(branch: &str, message: Option<&str>) {
     match MergeCommand::execute(branch, message) {
-        // Cazul 1: Merge-ul a reușit fără conflicte sau alte condiții speciale.
-        Ok(_) => {
-            // MergeCommand::execute probabil nu afișează nimic la succes,
-            // deci nu mai afișăm nimic suplimentar aici. Ieșim cu succes.
-            process::exit(0);
-        }
-
-        // Cazul 2: MergeCommand::execute a returnat o eroare.
+        Ok(_) => process::exit(0),
         Err(e) => {
-            // Convertim eroarea în string pentru comparații.
-            let error_message = e.to_string();
-
-            // Verificăm întâi cazurile specifice care *nu* sunt erori fatale.
-            if error_message == "Already up to date." {
-                // Tratăm "Already up to date" ca un succes, afișăm pe stdout.
-                println!("{}", error_message); // Afișează mesajul pe ieșirea standard
-                process::exit(0);             // Ieșim cu cod de succes (0).
-            }
-            // Verificăm apoi cazurile de conflict.
-            // Ajustează string-urile dacă mesajele tale de conflict sunt diferite.
-            else if error_message.contains("fix conflicts") || error_message.contains("Automatic merge failed") {
-                // Raportăm eroarea de conflict pe stderr și ieșim cu cod de eroare (1).
-                // Folosim mesajul original al erorii returnat de MergeCommand.
-                exit_with_error(&error_message);
-            }
-            // Tratăm toate celelalte erori ca eșecuri fatale ale merge-ului.
-            else {
-                // Raportăm eșecul generic al merge-ului pe stderr și ieșim cu cod de eroare (1).
-                exit_with_error(&format!("fatal: merge failed: {}", error_message));
+            // Pentru erori specifice de merge, dorim să afișăm un mesaj mai clar
+            if e.to_string().contains("Already up to date") {
+                println!("Already up to date.");
+                process::exit(0);
+            } else if e.to_string().contains("fix conflicts") {
+                // Dacă există conflicte, dorim să afișăm un mesaj de eroare mai clar
+                println!("{}", e);
+                println!("Conflicts detected. Fix conflicts and then run 'ash merge --continue'");
+                process::exit(1);
+            } else {
+                exit_with_error(&format!("fatal: {}", e));
             }
         }
+    }
+}
+
+// Funcție pentru a gestiona merge abort
+fn handle_merge_abort_command() {
+    // Inițializare repository
+    let mut repo = match Repository::new(".") {
+        Ok(r) => r,
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    };
+    
+    // Verificăm dacă există un merge în desfășurare
+    let git_path = Path::new(".").join(".ash");
+    let merge_head_path = git_path.join("MERGE_HEAD");
+    if !merge_head_path.exists() {
+        exit_with_error("fatal: There is no merge to abort");
+    }
+    
+    // Ștergem fișierele specifice merge-ului
+    let _ = std::fs::remove_file(merge_head_path);
+    let _ = std::fs::remove_file(git_path.join("MERGE_MSG"));
+    
+    // Citim HEAD-ul original
+    let orig_head_path = git_path.join(ORIG_HEAD);
+    let orig_head = match std::fs::read_to_string(&orig_head_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(e) => exit_with_error(&format!("fatal: Failed to read ORIG_HEAD: {}", e)),
+    };
+    
+    // Folosim ResetCommand pentru a face un hard reset la starea originală
+    match ResetCommand::execute(&[orig_head], false, false, true, true, None) {
+        Ok(_) => {
+            println!("Merge aborted");
+            process::exit(0);
+        },
+        Err(e) => exit_with_error(&format!("fatal: Failed to reset to ORIG_HEAD: {}", e)),
     }
 }

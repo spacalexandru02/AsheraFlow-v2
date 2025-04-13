@@ -9,3 +9,5 @@ pub mod log;
 pub mod merge;
 pub mod merge_tool;
 pub mod rm;
+pub mod reset;
+pub mod commit_writer;

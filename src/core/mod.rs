@@ -13,3 +13,4 @@ pub mod path_filter;
 pub mod revlist;
 pub mod merge;
 pub mod metadata;
+pub mod editor;

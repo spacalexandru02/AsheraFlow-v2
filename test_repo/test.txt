@@ -1,0 +1,5 @@
+<<<<<<< HEAD
+Original content
+=======
+Branch content
+>>>>>>> test-branch

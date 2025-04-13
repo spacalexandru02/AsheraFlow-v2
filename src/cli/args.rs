@@ -1,7 +1,12 @@
 #[derive(Debug)]
 pub enum Command {
     Init { path: String },
-    Commit { message: String },
+    Commit { 
+        message: String,
+        amend: bool,
+        reuse_message: Option<String>,
+        edit: bool,
+    },
     Add { paths: Vec<String> },
     Status { porcelain: bool, color: String }, 
     Diff { paths: Vec<String>, cached: bool },
@@ -32,6 +37,14 @@ pub enum Command {
         cached: bool,
         force: bool,
         recursive: bool,
+    },
+    Reset {
+        files: Vec<String>,
+        soft: bool,
+        mixed: bool,
+        hard: bool,
+        force: bool,
+        reuse_message: Option<String>,
     },
     Unknown { name: String },
 }
