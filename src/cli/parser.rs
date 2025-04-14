@@ -441,8 +441,205 @@ impl CliParser {
                     },
                 }
             },
+            "reset" => {
+                // Parse reset options
+                let mut files = Vec::new();
+                let mut soft = false;
+                let mut mixed = false;
+                let mut hard = false;
+                let mut force = false;
+                let mut reuse_message = None;
+                
+                // Process all arguments for options
+                let mut i = 2;
+                while i < args.len() {
+                    let arg = &args[i];
+                    match arg.as_str() {
+                        "--soft" => {
+                            soft = true;
+                            i += 1;
+                        },
+                        "--mixed" => {
+                            mixed = true;
+                            i += 1;
+                        },
+                        "--hard" => {
+                            hard = true;
+                            i += 1;
+                        },
+                        "--force" | "-f" => {
+                            force = true;
+                            i += 1;
+                        },
+                        "--reuse-message" | "-C" => {
+                            if i + 1 < args.len() {
+                                reuse_message = Some(args[i + 1].clone());
+                                i += 2;
+                            } else {
+                                return Err(Error::Generic("--reuse-message requires a value".to_string()));
+                            }
+                        },
+                        arg if arg.starts_with('-') => {
+                            return Err(Error::Generic(format!("Unknown option for reset: {}", arg)));
+                        },
+                        _ => {
+                            files.push(arg.clone());
+                            i += 1;
+                        }
+                    }
+                }
+                
+                CliArgs {
+                    command: Command::Reset {
+                        files,
+                        soft,
+                        mixed,
+                        hard,
+                        force,
+                        reuse_message,
+                    },
+                }
+            },
+            "cherry-pick" => {
+                let mut commit_args: Vec<String> = Vec::new();
+                let mut continue_op = false;
+                let mut abort = false;
+                let mut quit = false;
+                let mut mainline = None;
+                
+                let mut i = 2;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--continue" => {
+                            continue_op = true;
+                            i += 1;
+                        },
+                        "--abort" => {
+                            abort = true;
+                            i += 1;
+                        },
+                        "--quit" => {
+                            quit = true;
+                            i += 1;
+                        },
+                        "-m" | "--mainline" => {
+                            if i + 1 < args.len() {
+                                match args[i + 1].parse::<u32>() {
+                                    Ok(val) => {
+                                        mainline = Some(val);
+                                        i += 2;
+                                    },
+                                    Err(_) => return Err(Error::Generic("--mainline requires a positive integer".to_string())),
+                                }
+                            } else {
+                                return Err(Error::Generic("--mainline requires a value".to_string()));
+                            }
+                        },
+                        arg if arg.starts_with('-') => {
+                            return Err(Error::Generic(format!("Unknown option for cherry-pick: {}", arg)));
+                        },
+                        _ => {
+                            commit_args.push(args[i].clone());
+                            i += 1;
+                        }
+                    }
+                }
+                
+                // Check for invalid combinations
+                if (continue_op && abort) || (continue_op && quit) || (abort && quit) {
+                    return Err(Error::Generic("Cannot combine --continue, --abort, and --quit".to_string()));
+                }
+                
+                if (continue_op || abort || quit) && !commit_args.is_empty() {
+                    return Err(Error::Generic("Cannot combine --continue, --abort, or --quit with commits".to_string()));
+                }
+                
+                if commit_args.is_empty() && !(continue_op || abort || quit) {
+                    return Err(Error::Generic("cherry-pick requires at least one commit".to_string()));
+                }
+                
+                CliArgs {
+                    command: Command::CherryPick {
+                        args: commit_args,
+                        r#continue: continue_op,
+                        abort,
+                        quit,
+                        mainline,
+                    },
+                }
+            },
+            "revert" => {
+                let mut commit_args: Vec<String> = Vec::new();
+                let mut continue_op = false;
+                let mut abort = false;
+                let mut quit = false;
+                let mut mainline = None;
+                
+                let mut i = 2;
+                while i < args.len() {
+                    match args[i].as_str() {
+                        "--continue" => {
+                            continue_op = true;
+                            i += 1;
+                        },
+                        "--abort" => {
+                            abort = true;
+                            i += 1;
+                        },
+                        "--quit" => {
+                            quit = true;
+                            i += 1;
+                        },
+                        "-m" | "--mainline" => {
+                            if i + 1 < args.len() {
+                                match args[i + 1].parse::<u32>() {
+                                    Ok(val) => {
+                                        mainline = Some(val);
+                                        i += 2;
+                                    },
+                                    Err(_) => return Err(Error::Generic("--mainline requires a positive integer".to_string())),
+                                }
+                            } else {
+                                return Err(Error::Generic("--mainline requires a value".to_string()));
+                            }
+                        },
+                        arg if arg.starts_with('-') => {
+                            return Err(Error::Generic(format!("Unknown option for revert: {}", arg)));
+                        },
+                        _ => {
+                            commit_args.push(args[i].clone());
+                            i += 1;
+                        }
+                    }
+                }
+                
+                // Check for invalid combinations
+                if (continue_op && abort) || (continue_op && quit) || (abort && quit) {
+                    return Err(Error::Generic("Cannot combine --continue, --abort, and --quit".to_string()));
+                }
+                
+                if (continue_op || abort || quit) && !commit_args.is_empty() {
+                    return Err(Error::Generic("Cannot combine --continue, --abort, or --quit with commits".to_string()));
+                }
+                
+                if commit_args.is_empty() && !(continue_op || abort || quit) {
+                    return Err(Error::Generic("revert requires at least one commit".to_string()));
+                }
+                
+                CliArgs {
+                    command: Command::Revert {
+                        args: commit_args,
+                        r#continue: continue_op,
+                        abort,
+                        quit,
+                        mainline,
+                    },
+                }
+            },
             _ => CliArgs {
-                command: Command::Unknown { name: command },
+                command: Command::Unknown {
+                    name: command.clone(),
+                },
             },
         };
 

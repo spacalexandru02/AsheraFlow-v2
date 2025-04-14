@@ -331,4 +331,32 @@ impl Database {
         diff.compare_oids(a, b, filter)?;
         Ok(diff.changes)
     }
+
+    /// Obține un OID complet din unul prescurtat sau parțial
+    pub fn resolve_oid(&self, partial_oid: &str) -> Result<String, Error> {
+        // Dacă OID-ul are lungimea completă (40 de caractere), îl returnăm direct
+        if partial_oid.len() == 40 && partial_oid.chars().all(|c| c.is_ascii_hexdigit()) {
+            // Verificăm dacă obiectul există
+            if self.exists(partial_oid) {
+                return Ok(partial_oid.to_string());
+            }
+        }
+        
+        // Dacă OID-ul este parțial (minim 4 caractere), căutăm potriviri
+        if partial_oid.len() >= 4 && partial_oid.chars().all(|c| c.is_ascii_hexdigit()) {
+            let matches = self.prefix_match(partial_oid)?;
+            
+            if matches.is_empty() {
+                return Err(Error::Generic(format!("No object found with prefix {}", partial_oid)));
+            }
+            
+            if matches.len() > 1 {
+                return Err(Error::Generic(format!("Ambiguous object prefix: {} matches multiple objects", partial_oid)));
+            }
+            
+            return Ok(matches[0].clone());
+        }
+        
+        Err(Error::Generic(format!("Invalid object identifier: {}", partial_oid)))
+    }
 }

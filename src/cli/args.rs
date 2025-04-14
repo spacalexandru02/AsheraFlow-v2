@@ -46,6 +46,20 @@ pub enum Command {
         force: bool,
         reuse_message: Option<String>,
     },
+    CherryPick {
+        args: Vec<String>,
+        r#continue: bool,
+        abort: bool,
+        quit: bool,
+        mainline: Option<u32>,
+    },
+    Revert {
+        args: Vec<String>,
+        r#continue: bool,
+        abort: bool,
+        quit: bool,
+        mainline: Option<u32>,
+    },
     Unknown { name: String },
 }
 

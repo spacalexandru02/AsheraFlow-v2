@@ -26,6 +26,8 @@ use crate::core::database::database::Database;
 use commands::commit_writer::CommitWriter;
 use crate::core::repository::pending_commit::PendingCommitType;
 use commands::commit::get_editor_command;
+use commands::cherry_pick::CherryPickCommand;
+use commands::revert::RevertCommand;
 
 mod cli;
 mod commands;
@@ -74,6 +76,12 @@ fn main() {
                 },
                 Command::Reset { files, soft, mixed, hard, force, reuse_message } => {
                     handle_reset_command(&files, soft, mixed, hard, force, reuse_message.as_deref())
+                },
+                Command::CherryPick { args, r#continue, abort, quit, mainline } => {
+                    handle_cherry_pick_command(&args, r#continue, abort, quit, mainline)
+                },
+                Command::Revert { args, r#continue, abort, quit, mainline } => {
+                    handle_revert_command(&args, r#continue, abort, quit, mainline)
                 },
                 Command::Unknown { name } => {
                     println!("Unknown command: {}", name);
@@ -250,6 +258,20 @@ fn handle_rm_command(files: &[String], cached: bool, force: bool, recursive: boo
 
 fn handle_reset_command(files: &[String], soft: bool, mixed: bool, hard: bool, force: bool, reuse_message: Option<&str>) {
     match ResetCommand::execute(files, soft, mixed, hard, force, reuse_message) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+fn handle_cherry_pick_command(commits: &[String], continue_op: bool, abort: bool, quit: bool, mainline: Option<u32>) {
+    match CherryPickCommand::execute(commits, continue_op, abort, quit, mainline) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+fn handle_revert_command(commits: &[String], continue_op: bool, abort: bool, quit: bool, mainline: Option<u32>) {
+    match RevertCommand::execute(commits, continue_op, abort, quit, mainline) {
         Ok(_) => process::exit(0),
         Err(e) => exit_with_error(&format!("fatal: {}", e)),
     }

@@ -10,6 +10,7 @@ pub enum LockError {
     LockDenied(String),
 }
 
+#[derive(Debug)]
 pub struct Lockfile {
     file_path: PathBuf,
     lock_path: PathBuf,

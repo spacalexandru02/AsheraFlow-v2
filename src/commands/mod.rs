@@ -11,3 +11,5 @@ pub mod merge_tool;
 pub mod rm;
 pub mod reset;
 pub mod commit_writer;
+pub mod cherry_pick;
+pub mod revert;

@@ -322,7 +322,7 @@ impl<'a> CommitWriter<'a> {
         Ok(())
     }
     
-    fn write_cherry_pick_commit(&mut self, editor_cmd: Option<String>, notes: Option<&str>) -> Result<(), Error> {
+    pub fn write_cherry_pick_commit(&mut self, editor_cmd: Option<String>, notes: Option<&str>) -> Result<(), Error> {
         let parents = vec![
             self.refs.read_head()?.unwrap_or_default(),
         ];
@@ -348,7 +348,7 @@ impl<'a> CommitWriter<'a> {
         Ok(())
     }
     
-    fn write_revert_commit(&mut self, editor_cmd: Option<String>) -> Result<(), Error> {
+    pub fn write_revert_commit(&mut self, editor_cmd: Option<String>) -> Result<(), Error> {
         let parents = vec![
             self.refs.read_head()?.unwrap_or_default(),
         ];
@@ -363,5 +363,14 @@ impl<'a> CommitWriter<'a> {
         self.pending_commit.clear(PendingCommitType::Revert)?;
         
         Ok(())
+    }
+
+    pub fn get_editor_command(&self) -> String {
+        let editor = std::env::var("GIT_EDITOR")
+            .or_else(|_| std::env::var("VISUAL"))
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+        
+        editor
     }
 } 

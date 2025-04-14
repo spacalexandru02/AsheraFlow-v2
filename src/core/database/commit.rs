@@ -5,14 +5,14 @@ use std::any::Any;
 use std::str;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Commit {
-    oid: Option<String>,
-    parent: Option<String>,
-    tree: String,
-    author: Author,
-    committer: Author,
-    message: String,
+    pub oid: Option<String>,
+    pub parent: Option<String>,
+    pub tree: String,
+    pub author: Author,
+    pub committer: Author,
+    pub message: String,
 }
 
 impl GitObject for Commit {

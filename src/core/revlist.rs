@@ -7,6 +7,9 @@ use crate::core::database::commit::Commit;
 use crate::core::revision::{HEAD, COMMIT};
 use crate::core::path_filter::PathFilter;
 use crate::errors::error::Error;
+use crate::core::refs::Refs;
+use std::iter::Iterator;
+use std::path::Path;
 
 /// RevList handles traversing commit history and filtering commits
 /// based on various criteria (date, path, etc.)
@@ -42,7 +45,7 @@ enum Flag {
 
 impl<'a> RevList<'a> {
     /// Create a new RevList with the given revisions
-    pub fn new(database: &'a mut Database, revisions: &[String]) -> Result<Self, Error> {
+    pub fn new(database: &'a mut Database, refs: &Refs, revisions: &[String], walk: bool) -> Result<Self, Error> {
         let mut revlist = RevList {
             database,
             commits: HashMap::new(),
@@ -86,6 +89,11 @@ impl<'a> RevList<'a> {
             revlist.limit_list()?;
         }
         
+        // If walk is true, fill the output with commits
+        if walk {
+            revlist.fill_output()?;
+        }
+        
         Ok(revlist)
     }
     
@@ -123,25 +131,25 @@ impl<'a> RevList<'a> {
     /// Set a starting point for the revision walk
     fn set_start_point(&mut self, rev: &str, interesting: bool) -> Result<(), Error> {
         // Resolve the revision to a commit OID
-        // This should be done with a Repository but for this example we'll fake it
-        // Direct implementation would call repo.database.load()
-        let oid = match rev {
-            HEAD => {
-                // In a real implementation, would resolve HEAD to a commit OID
-                // For now, just return a placeholder
-                "HEAD_COMMIT_OID".to_string()
-            },
-            _ => {
-                // Fake resolution for other refs
-                format!("{}_RESOLVED", rev)
-            }
+        let oid = if rev == HEAD {
+            // For HEAD, resolve through refs
+            let refs = Refs::new(Path::new(".").join(".ash"));
+            refs.read_head()?.ok_or_else(|| Error::Generic("Could not resolve HEAD".to_string()))?
+        } else if rev.len() >= 4 && rev.chars().all(|c| c.is_ascii_hexdigit()) {
+            // It's likely a commit hash (full or abbreviated)
+            // Try to use it directly or look it up in the database
+            self.database.resolve_oid(rev)?
+        } else {
+            // Try to resolve as a branch or tag reference
+            let refs = Refs::new(Path::new(".").join(".ash"));
+            refs.read_ref(rev)?.ok_or_else(|| Error::Generic(format!("Reference not found: {}", rev)))?
         };
         
         // Load the commit
         let commit = self.load_commit(&oid)?;
         
-        // Add to the queue - use clone_box instead of clone
-        self.enqueue_commit(commit.clone_box());
+        // Add to the queue
+        self.enqueue_commit(commit);
         
         // If not interesting, mark as uninteresting and propagate to parents
         if !interesting {
@@ -415,5 +423,69 @@ impl<'a> RevList<'a> {
         }
         
         Ok(())
+    }
+
+    // Add a method to fill the output vector with commits
+    fn fill_output(&mut self) -> Result<(), Error> {
+        // Process all commits
+        while !self.queue.is_empty() {
+            let commit = self.queue.pop_front().unwrap();
+            
+            let oid = self.get_oid(&commit);
+            
+            // Skip uninteresting commits
+            if self.is_marked(&oid, &Flag::Uninteresting) {
+                continue;
+            }
+            
+            // Skip commits that don't change paths we care about
+            if self.is_marked(&oid, &Flag::TreeSame) {
+                continue;
+            }
+            
+            // Add parents to queue
+            self.add_parents(&commit)?;
+            
+            // Add to output
+            self.output.push(commit);
+        }
+        
+        Ok(())
+    }
+    
+    // Add iterator method to get the next commit
+    pub fn next(&mut self) -> Option<Result<Commit, Error>> {
+        // If the output is empty, try to fill it
+        if self.output.is_empty() {
+            // If we can't fill it, we're done
+            if let Err(e) = self.fill_output() {
+                return Some(Err(e));
+            }
+            // If still empty after fill, we're done
+            if self.output.is_empty() {
+                return None;
+            }
+        }
+        
+        // Get the next commit
+        let commit = self.output.pop();
+        
+        // Convert to Commit type
+        commit.map(|c| {
+            // Cast to Commit
+            match c.as_any().downcast_ref::<Commit>() {
+                Some(commit) => Ok(commit.clone()),
+                None => Err(Error::Generic("Object is not a commit".to_string())),
+            }
+        })
+    }
+}
+
+// Implement the Iterator trait for RevList
+impl<'a> Iterator for RevList<'a> {
+    type Item = Result<Commit, Error>;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
     }
 }
