@@ -22,26 +22,83 @@ impl CliParser {
             },
             "commit" => {
                 let mut message = None; // Use Option for message initially
+                let mut amend = false;
+                let mut reuse_message = None;
+                let mut edit = false;
+                
                 let mut i = 2;
                 while i < args.len() {
-                    if (args[i] == "--message" || args[i] == "-m") && i + 1 < args.len() {
-                        message = Some(args[i + 1].to_owned());
-                        i += 2; // Skip both flag and value
-                    } else {
-                        // Handle potential unknown flags or arguments here if needed
-                        i += 1;
+                    match args[i].as_str() {
+                        "--message" | "-m" => {
+                            if i + 1 < args.len() {
+                                message = Some(args[i + 1].to_owned());
+                                i += 2; // Skip both flag and value
+                            } else {
+                                return Err(Error::Generic("--message requires a value".to_string()));
+                            }
+                        },
+                        "--amend" => {
+                            amend = true;
+                            i += 1;
+                        },
+                        "--edit" | "-e" => {
+                            edit = true;
+                            i += 1;
+                        },
+                        "--reuse-message" | "-C" => {
+                            if i + 1 < args.len() {
+                                reuse_message = Some(args[i + 1].to_owned());
+                                i += 2;
+                            } else {
+                                return Err(Error::Generic("--reuse-message requires a value".to_string()));
+                            }
+                        },
+                        "--reedit-message" | "-c" => {
+                            if i + 1 < args.len() {
+                                reuse_message = Some(args[i + 1].to_owned());
+                                edit = true;
+                                i += 2;
+                            } else {
+                                return Err(Error::Generic("--reedit-message requires a value".to_string()));
+                            }
+                        },
+                        "--file" | "-F" => {
+                            if i + 1 < args.len() {
+                                // Just parse the message from the file here
+                                let file_path = &args[i + 1];
+                                match std::fs::read_to_string(file_path) {
+                                    Ok(content) => {
+                                        message = Some(content);
+                                        i += 2;
+                                    },
+                                    Err(e) => {
+                                        return Err(Error::Generic(format!("Failed to read message file: {}", e)));
+                                    }
+                                }
+                            } else {
+                                return Err(Error::Generic("--file requires a value".to_string()));
+                            }
+                        },
+                        _ => {
+                            // Handle potential unknown flags or arguments
+                            return Err(Error::Generic(format!("Unknown option for commit: {}", args[i])));
+                        }
                     }
                 }
 
-                if message.is_none() {
-                     // Try reading from standard input or editor if no -m is provided (like git)
-                     // For now, require the message flag
-                    return Err(Error::Generic("Commit message is required. Use --message <msg> or -m <msg>".to_string()));
+                // No message needed with --amend (can reuse previous commit message)
+                if message.is_none() && reuse_message.is_none() && !amend {
+                    // Try reading from standard input or editor if no -m is provided (like git)
+                    // For now, we'll require a message one way or another
+                    return Err(Error::Generic("Commit message is required. Use --message/-m, --file/-F, --reuse-message/-C, or --amend".to_string()));
                 }
 
                 CliArgs {
                     command: Command::Commit {
-                        message: message.unwrap(), // Unwrap is safe here due to check above
+                        message: message.unwrap_or_default(),
+                        amend,
+                        reuse_message,
+                        edit,
                     },
                 }
             },

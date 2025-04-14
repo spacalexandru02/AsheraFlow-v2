@@ -23,7 +23,7 @@ impl Editor {
             .create(true)
             .truncate(true)
             .open(&path)
-            .map_err(|e| Error::Generic(format!("Failed to open editor file: {}", e)))?;
+            .map_err(|e| Error::Generic(format!("Failed to open file for editing: {}", e)))?;
 
         Ok(Self {
             path,
@@ -47,9 +47,9 @@ impl Editor {
             return Ok(());
         }
         self.file.write_all(string.as_bytes())
-            .map_err(|e| Error::Generic(format!("Failed to write to editor file: {}", e)))?;
+            .map_err(|e| Error::Generic(format!("Failed to write to file: {}", e)))?;
         self.file.write_all(b"\n")
-            .map_err(|e| Error::Generic(format!("Failed to write newline to editor file: {}", e)))?;
+            .map_err(|e| Error::Generic(format!("Failed to write newline to file: {}", e)))?;
 
         Ok(())
     }
@@ -60,7 +60,7 @@ impl Editor {
         }
         for line in string.lines() {
             write!(self.file, "# {}\n", line)
-                .map_err(|e| Error::Generic(format!("Failed to write note to editor file: {}", e)))?;
+                .map_err(|e| Error::Generic(format!("Failed to write note to file: {}", e)))?;
         }
 
         Ok(())
@@ -116,4 +116,4 @@ impl Editor {
             Some(format!("{}\n", lines.join("\n").trim()))
         }
     }
-} 
+}

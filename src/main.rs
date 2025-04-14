@@ -11,7 +11,7 @@ use commands::add::AddCommand;
 use commands::log::LogCommand;
 use commands::status::StatusCommand;
 use commands::branch::BranchCommand;
-// --- Adaugă import pentru MergeCommand și MergeToolCommand ---
+// Imports for merge and related operations
 use commands::merge::MergeCommand;
 use commands::merge_tool::MergeToolCommand;
 use commands::rm::RmCommand;
@@ -22,6 +22,10 @@ use crate::core::refs::Refs;
 use crate::errors::error::Error;
 use std::time::Instant;
 use crate::core::repository::repository::Repository;
+use crate::core::database::database::Database;
+use commands::commit_writer::CommitWriter;
+use crate::core::repository::pending_commit::PendingCommitType;
+use commands::commit::get_editor_command;
 
 mod cli;
 mod commands;
@@ -40,7 +44,7 @@ fn main() {
             match cli_args.command {
                 Command::Init { path } => handle_init_command(&path),
                 Command::Commit { message, amend, reuse_message, edit } => 
-                    handle_commit_command(&message),
+                    handle_commit_command(&message, amend, reuse_message, edit),
                 Command::Add { paths } => handle_add_command(&paths),
                 Command::Status { porcelain, color } => handle_status_command(porcelain, &color),
                 Command::Diff { paths, cached } => handle_diff_command(&paths, cached),
@@ -55,7 +59,10 @@ fn main() {
                     if abort {
                         handle_merge_abort_command();
                     } else if continue_merge {
-                        handle_merge_continue_command();
+                        match handle_merge_continue_command() {
+                            Ok(_) => process::exit(0),
+                            Err(e) => exit_with_error(&format!("fatal: {}", e)),
+                        }
                     } else if tool.is_some() && branch.is_empty() {
                         handle_merge_tool_command(tool.as_deref());
                     } else {
@@ -87,8 +94,8 @@ fn main() {
     }
 }
 
-fn handle_commit_command(message: &str) {
-    match CommitCommand::execute(message) {
+fn handle_commit_command(message: &str, amend: bool, reuse_message: Option<String>, edit: bool) {
+    match CommitCommand::execute(message, amend, reuse_message.as_deref(), edit) {
         Ok(_) => process::exit(0),
         Err(e) => exit_with_error(&format!("fatal: {}", e)),
     }
@@ -174,7 +181,7 @@ fn handle_merge_tool_command(tool: Option<&str>) {
 }
 
 /// Handles merge continue operation
-fn handle_merge_continue_command() {
+fn handle_merge_continue_command() -> Result<(), Error> {
     println!("Checking for unresolved conflicts...");
     
     // Initialize repository components
@@ -182,43 +189,55 @@ fn handle_merge_continue_command() {
     let git_path = root_path.join(".ash");
     
     if !git_path.exists() {
-        println!("Not an AsheraFlow repository: .ash directory not found");
-        process::exit(1);
+        return Err(Error::Generic("Not an AsheraFlow repository: .ash directory not found".into()));
     }
     
-    // Check if we can access the index
-    let mut index = Index::new(git_path.join("index"));
+    let db_path = git_path.join("objects");
+    let mut database = Database::new(db_path);
+    
+    // Check for the index file
+    let index_path = git_path.join("index");
+    if !index_path.exists() {
+        return Err(Error::Generic("No index file found.".into()));
+    }
+    
+    // Load the index
+    let mut index = Index::new(index_path);
     match index.load() {
-        Ok(_) => {
-            // Check if there are unresolved conflicts
-            if index.has_conflict() {
-                println!("There are still unresolved conflicts.");
-                println!("Fix the conflicts first, then run 'ash merge --continue'");
-                process::exit(1);
-            }
-        },
-        Err(e) => {
-            println!("Error loading index: {}", e);
-            process::exit(1);
-        }
+        Ok(_) => println!("Index loaded successfully"),
+        Err(e) => return Err(Error::Generic(format!("Error loading index: {}", e))),
     }
     
-    // All conflicts are resolved, complete the merge with a commit
-    println!("All conflicts resolved. Creating merge commit...");
+    // Check for unresolved conflicts BEFORE creating CommitWriter
+    if index.has_conflict() {
+        return Err(Error::Generic(
+            "Cannot continue due to unresolved conflicts. Fix conflicts and add the files.".into(),
+        ));
+    }
     
-    // Generate a default merge message
-    let message = "Merge branch (conflicts resolved)";
+    // Create refs object
+    let refs = Refs::new(&git_path);
     
-    // In merge --continue we don't need to specify a branch, so use empty string
-    match CommitCommand::execute(message) {
-        Ok(_) => {
-            println!("Merge completed successfully.");
-            process::exit(0);
-        },
-        Err(e) => {
-            println!("Error completing merge: {}", e);
-            process::exit(1);
-        }
+    // Create CommitWriter
+    let mut commit_writer = CommitWriter::new(
+        root_path,
+        git_path.clone(),
+        &mut database,
+        &mut index,
+        &refs
+    );
+    
+    // If all conflicts are resolved, check for pending operation type and resume it
+    if commit_writer.pending_commit.in_progress(PendingCommitType::Merge) {
+        return commit_writer.resume_merge(PendingCommitType::Merge, get_editor_command());
+    } else if commit_writer.pending_commit.in_progress(PendingCommitType::CherryPick) {
+        return commit_writer.resume_merge(PendingCommitType::CherryPick, get_editor_command());
+    } else if commit_writer.pending_commit.in_progress(PendingCommitType::Revert) {
+        return commit_writer.resume_merge(PendingCommitType::Revert, get_editor_command());
+    } else {
+        return Err(Error::Generic(
+            "No merge, cherry-pick, or revert in progress. Nothing to continue.".into(),
+        ));
     }
 }
 
