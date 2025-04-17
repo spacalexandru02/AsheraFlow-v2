@@ -248,6 +248,24 @@ impl Database {
                 Ok(commit) => Box::new(commit),
                 Err(e) => return Err(e),
             },
+            "sprint-meta" => {
+                // Parse the metadata from the encoded string
+                let encoded = String::from_utf8_lossy(content).to_string();
+                if let Some(metadata) = crate::core::branch_metadata::SprintMetadata::decode(&encoded) {
+                    Box::new(crate::core::database::sprint_metadata_object::SprintMetadataObject::new(metadata))
+                } else {
+                    return Err(Error::Generic(format!("Invalid sprint metadata content: {}", encoded)))
+                }
+            },
+            "task-meta" => {
+                // Parse the metadata from the encoded string
+                let encoded = String::from_utf8_lossy(content).to_string();
+                if let Some(metadata) = crate::core::commit_metadata::TaskMetadata::decode(&encoded) {
+                    Box::new(crate::core::database::task_metadata_object::TaskMetadataObject::new(metadata))
+                } else {
+                    return Err(Error::Generic(format!("Invalid task metadata content: {}", encoded)))
+                }
+            },
             _ => return Err(Error::Generic(format!("Unknown object type: {}", obj_type))),
         };
         

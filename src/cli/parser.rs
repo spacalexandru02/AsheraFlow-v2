@@ -636,6 +636,109 @@ impl CliParser {
                     },
                 }
             },
+            "sprint" => {
+                if args.len() < 3 {
+                    return Err(Error::Generic("Sprint command requires a subcommand (e.g., start, info)".to_string()));
+                }
+                
+                let subcommand = args[2].to_lowercase();
+                match subcommand.as_str() {
+                    "start" => {
+                        if args.len() < 5 {
+                            return Err(Error::Generic("sprint start requires a name and duration".to_string()));
+                        }
+                        
+                        let name = args[3].clone();
+                        let duration = match args[4].parse::<u32>() {
+                            Ok(d) => d,
+                            Err(_) => return Err(Error::Generic("Duration must be a positive integer".to_string())),
+                        };
+                        
+                        CliArgs {
+                            command: Command::SprintStart {
+                                name,
+                                duration,
+                            },
+                        }
+                    },
+                    "info" => {
+                        CliArgs {
+                            command: Command::SprintInfo {},
+                        }
+                    },
+                    _ => {
+                        return Err(Error::Generic(format!("Unknown sprint subcommand: {}", subcommand)));
+                    }
+                }
+            },
+            "task" => {
+                if args.len() < 3 {
+                    return Err(Error::Generic("Task command requires a subcommand (e.g., create, complete)".to_string()));
+                }
+                
+                let subcommand = args[2].to_lowercase();
+                let mut args_iter = args.iter().skip(3);
+                match subcommand.as_str() {
+                    "create" => {
+                        if args.len() < 5 {
+                            return Err(Error::Generic("task create requires an id and description".to_string()));
+                        }
+                        
+                        let id = args[3].clone();
+                        let description = args[4].clone();
+                        
+                        // Parse optional story points
+                        let story_points = if args.len() > 5 {
+                            match args[5].parse::<u32>() {
+                                Ok(sp) => Some(sp),
+                                Err(_) => return Err(Error::Generic("Story points must be a positive integer".to_string())),
+                            }
+                        } else {
+                            None
+                        };
+                        
+                        CliArgs {
+                            command: Command::TaskCreate {
+                                id,
+                                description,
+                                story_points,
+                            },
+                        }
+                    },
+                    "complete" => {
+                        if args.len() < 4 {
+                            return Err(Error::Generic("task complete requires a task id".to_string()));
+                        }
+                        
+                        let id = args[3].clone();
+                        
+                        // Check for --auto-merge flag
+                        let auto_merge = args.iter().skip(4).any(|arg| arg == "--auto-merge");
+                        
+                        CliArgs {
+                            command: Command::TaskComplete {
+                                id,
+                                story_points: None,
+                                auto_merge,
+                            },
+                        }
+                    },
+                    "status" => {
+                        if args.len() < 4 {
+                            return Err(Error::Generic("Task ID is required".into()));
+                        }
+                        
+                        let id = args[3].clone();
+                        
+                        return Ok(CliArgs {
+                            command: Command::TaskStatus {
+                                id,
+                            },
+                        });
+                    },
+                    _ => return Err(Error::Generic(format!("Unknown task subcommand: {}", subcommand))),
+                }
+            },
             _ => CliArgs {
                 command: Command::Unknown {
                     name: command.clone(),
@@ -647,26 +750,34 @@ impl CliParser {
     }
 
     pub fn format_help() -> String {
-        format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-            "Usage: ash <command> [options]",
-            "Commands:",
-            "  init [path]                       Initialize a new repository",
-            "  add <paths...>                    Add file contents to the index",
-            "  commit -m <message>               Commit changes to the repository",
-            "  status [--porcelain] [--color=...] Show the working tree status",
-            "  diff [--cached] [paths...]        Show changes (HEAD vs index or index vs workspace)",
-            "  branch [-v] [-d|-D] [<n> [<sp>]]  Manage branches (list, create, delete)",
-            "  checkout <target>                 Switch branches or restore working tree files",
-            "  log [--oneline] [--decorate=...]  Show commit logs",
-            "  merge <branch> [-m <msg>]         Merge the specified branch into the current branch",
-            "        --abort                     Abort the current merge resolution process",
-            "        --continue                  Continue the merge after resolving conflicts",
-            "        --tool=<tool>               Use specified tool to resolve merge conflicts",
-            "        --tool-only                 Run merge tool to resolve conflicts without merging",
-            "Common Options:",
-            "  (Options specific to commands listed above)",
-            "  --help                           Display this help message"
-        )
+        let mut help = String::new();
+        
+        help.push_str("Usage: ash <command> [options]\n");
+        help.push_str("Commands:\n");
+        help.push_str("  init [path]                       Initialize a new repository\n");
+        help.push_str("  add <paths...>                    Add file contents to the index\n");
+        help.push_str("  commit -m <message>               Commit changes to the repository\n");
+        help.push_str("  status [--porcelain] [--color=...] Show the working tree status\n");
+        help.push_str("  diff [--cached] [paths...]        Show changes (HEAD vs index or index vs workspace)\n");
+        help.push_str("  branch [-v] [-d|-D] [<n> [<sp>]]  Manage branches (list, create, delete)\n");
+        help.push_str("  checkout <target>                 Switch branches or restore working tree files\n");
+        help.push_str("  log [--oneline] [--decorate=...]  Show commit logs\n");
+        help.push_str("  merge <branch> [-m <msg>]         Merge the specified branch into the current branch\n");
+        help.push_str("        --abort                     Abort the current merge resolution process\n");
+        help.push_str("        --continue                  Continue the merge after resolving conflicts\n");
+        help.push_str("        --tool=<tool>               Use specified tool to resolve merge conflicts\n");
+        help.push_str("        --tool-only                 Run merge tool to resolve conflicts without merging\n");
+        help.push_str("\n");
+        help.push_str("Sprint & Task Management:\n");
+        help.push_str("  sprint start <n> <duration>    Start a new sprint with specified name and duration in days\n");
+        help.push_str("  task create <id> <desc> [<sp>]    Create a new task in the current sprint\n");
+        help.push_str("  task complete <id> [--auto-merge] Mark a task as completed\n");
+        help.push_str("  task status <id>                  Show status information for a task\n");
+        help.push_str("\n");
+        help.push_str("Common Options:\n");
+        help.push_str("  (Options specific to commands listed above)\n");
+        help.push_str("  --help                           Display this help message\n");
+        
+        help
     }
 }

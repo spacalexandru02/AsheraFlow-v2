@@ -60,6 +60,26 @@ pub enum Command {
         quit: bool,
         mainline: Option<u32>,
     },
+    // Sprint management commands
+    SprintStart {
+        name: String,
+        duration: u32, // Duration in days
+    },
+    SprintInfo {},
+    // Task management commands
+    TaskCreate {
+        id: String,
+        description: String,
+        story_points: Option<u32>,
+    },
+    TaskComplete {
+        id: String,
+        story_points: Option<i32>,
+        auto_merge: bool,
+    },
+    TaskStatus {
+        id: String,
+    },
     Unknown { name: String },
 }
 

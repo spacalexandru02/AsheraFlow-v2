@@ -16,6 +16,9 @@ use commands::merge::MergeCommand;
 use commands::merge_tool::MergeToolCommand;
 use commands::rm::RmCommand;
 use commands::reset::ResetCommand;
+// Sprint and task imports
+use commands::sprint::{SprintStartCommand, SprintInfoCommand};
+use commands::task::{TaskCreateCommand, TaskCompleteCommand, TaskStatusCommand};
 use std::path::Path;
 use crate::core::index::index::Index;
 use crate::core::refs::Refs;
@@ -28,6 +31,7 @@ use crate::core::repository::pending_commit::PendingCommitType;
 use commands::commit::get_editor_command;
 use commands::cherry_pick::CherryPickCommand;
 use commands::revert::RevertCommand;
+use crate::core::commit_metadata::{CommitMetadataManager, TaskStatus};
 
 mod cli;
 mod commands;
@@ -82,6 +86,26 @@ fn main() {
                 },
                 Command::Revert { args, r#continue, abort, quit, mainline } => {
                     handle_revert_command(&args, r#continue, abort, quit, mainline)
+                },
+                // Sprint management commands
+                Command::SprintStart { name, duration } => {
+                    handle_sprint_start_command(&name, duration)
+                },
+                Command::SprintInfo {} => {
+                    handle_sprint_info_command()
+                },
+                // Task management commands
+                Command::TaskCreate { id, description, story_points } => {
+                    handle_task_create_command(&id, &description, story_points)
+                },
+                Command::TaskComplete { id, story_points: _, auto_merge } => {
+                    handle_task_complete_command(&id, auto_merge)
+                },
+                Command::TaskStatus { id } => {
+                    match TaskStatusCommand::execute(&id) {
+                        Ok(_) => process::exit(0),
+                        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+                    }
                 },
                 Command::Unknown { name } => {
                     println!("Unknown command: {}", name);
@@ -340,5 +364,35 @@ fn handle_merge_abort_command() {
             process::exit(0);
         },
         Err(e) => exit_with_error(&format!("fatal: Failed to reset to ORIG_HEAD: {}", e)),
+    }
+}
+
+// Sprint command handlers
+fn handle_sprint_start_command(name: &str, duration: u32) {
+    match SprintStartCommand::execute(name, duration) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+fn handle_sprint_info_command() {
+    match SprintInfoCommand::execute() {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+// Task command handlers
+fn handle_task_create_command(id: &str, description: &str, story_points: Option<u32>) {
+    match TaskCreateCommand::execute(id, description, story_points) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
+    }
+}
+
+fn handle_task_complete_command(id: &str, auto_merge: bool) {
+    match TaskCompleteCommand::execute(id, auto_merge) {
+        Ok(_) => process::exit(0),
+        Err(e) => exit_with_error(&format!("fatal: {}", e)),
     }
 }

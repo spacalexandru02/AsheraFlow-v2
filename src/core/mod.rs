@@ -14,3 +14,6 @@ pub mod revlist;
 pub mod merge;
 pub mod metadata;
 pub mod editor;
+pub mod branch_metadata;
+pub mod commit_metadata;
+pub mod sprint;

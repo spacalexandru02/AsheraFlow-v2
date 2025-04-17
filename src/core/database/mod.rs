@@ -5,3 +5,5 @@ pub mod tree;
 pub mod author;
 pub mod entry;
 pub mod tree_diff;
+pub mod sprint_metadata_object;
+pub mod task_metadata_object;

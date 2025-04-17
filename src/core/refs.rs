@@ -82,6 +82,30 @@ impl Refs {
         self.update_symref(&self.pathname.join(HEAD), oid)
     }
     
+    // Update a reference directly with an OID
+    pub fn update_ref(&self, name: &str, oid: &str) -> Result<(), Error> {
+        // Determine correct path for the reference
+        let ref_path = if name.starts_with("refs/") {
+            self.pathname.join(name)
+        } else {
+            self.refs_path.join(name)
+        };
+        
+        // Create parent directories if they don't exist
+        if let Some(parent) = ref_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::DirectoryCreation(format!(
+                    "Failed to create directory '{}': {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
+        }
+        
+        // Update the reference file
+        self.update_ref_file(&ref_path, oid)
+    }
+    
     // Create a new branch pointing to the specified commit OID
     pub fn create_branch(&self, branch_name: &str, oid: &str) -> Result<(), Error> {
         // Validate branch name using regex pattern for invalid names
@@ -411,6 +435,76 @@ impl Refs {
                     // For other errors, report them
                     return Err(Error::IO(e));
                 }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    // List all refs with a specific prefix
+    pub fn list_refs_with_prefix(&self, prefix: &str) -> Result<Vec<Reference>, Error> {
+        let mut refs = Vec::new();
+        
+        // Determinăm directorul bazat pe prefix
+        let prefix_path = self.pathname.join(prefix);
+        let prefix_dir = if prefix_path.is_dir() {
+            prefix_path
+        } else {
+            // Dacă prefixul nu este un director, încercăm să obținem directorul părinte
+            if let Some(parent) = prefix_path.parent() {
+                parent.to_path_buf()
+            } else {
+                // Dacă nu există un părinte, folosim rădăcina refs
+                self.refs_path.clone()
+            }
+        };
+        
+        // Verificăm dacă directorul există
+        if !prefix_dir.exists() {
+            return Ok(refs);
+        }
+        
+        // Citim referințele din director, recursiv
+        self.read_refs_with_prefix(&prefix_dir, prefix, &mut refs)?;
+        
+        Ok(refs)
+    }
+    
+    // Internally read refs with a specific prefix
+    fn read_refs_with_prefix(&self, dir: &Path, prefix: &str, refs: &mut Vec<Reference>) -> Result<(), Error> {
+        if !dir.exists() {
+            return Ok(());
+        }
+        
+        match fs::read_dir(dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        let path_str = path.to_string_lossy().to_string();
+                        
+                        // Verificăm dacă începe cu prefixul dorit
+                        if !path_str.contains(prefix) {
+                            continue;
+                        }
+                        
+                        if path.is_dir() {
+                            // Recursiv pentru directoare
+                            self.read_refs_with_prefix(&path, prefix, refs)?;
+                        } else {
+                            // Adăugăm referința dacă este un fișier
+                            if let Some(relative) = path.strip_prefix(&self.pathname).ok() {
+                                let relative_str = relative.to_string_lossy().to_string();
+                                if relative_str.starts_with(prefix) {
+                                    refs.push(Reference::Symbolic(relative_str));
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                return Err(Error::IO(e));
             }
         }
         
